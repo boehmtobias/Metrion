@@ -119,7 +119,10 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
         "--unit=rapl-idle",
         "--collect",
         "--wait",
-        "--property=StandardOutput=file:" + str(log_file),
+        # MetriLens patch: append:, not file:. StandardOutput= applies to ExecStopPost= too,
+        # whose --thaw-only path returns before the script's own `exec >>`, so file: wrote at
+        # offset 0 and overwrote the head of the measurement log.
+        "--property=StandardOutput=append:" + str(log_file),
         "--property=ExecStopPost=" + thaw_only_cmd,
         "--property=RuntimeMaxSec=" + str(run_max_sec),
         str(script_path),
