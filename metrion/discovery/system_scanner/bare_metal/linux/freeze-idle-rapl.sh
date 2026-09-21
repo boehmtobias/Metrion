@@ -123,7 +123,8 @@ if (( THAW_ONLY )); then
     if [[ -r "$STATE_FILE" ]]; then
         echo "Thaw   : $(date --iso=seconds) (--thaw-only, replaying $STATE_FILE)"
         mapfile -t _stale < "$STATE_FILE"
-        for (( i=${#_stale[@]}-1; i>=0; i-- )); do
+        # MetriLens patch: forward, parents before children. Same reason as thaw_units.
+        for (( i=0; i<${#_stale[@]}; i++ )); do
             u="${_stale[i]}"
             [[ -n "$u" ]] || continue
             echo "Thawing  $u"
@@ -311,8 +312,10 @@ freeze_units(){
 }
 
 thaw_units(){
-    # Thaw in reverse order (children first, then parents)
-    for (( i=${#FREEZE[@]}-1; i>=0; i-- )); do
+    # MetriLens patch: thaw parents before children. A reverse walk thaws user.slice last, so
+    # FreezerState queries below user@<uid>.service hit a frozen manager and burn `timeout 5`
+    # each; systemd also refuses to thaw a child while its parent is frozen.
+    for (( i=0; i<${#FREEZE[@]}; i++ )); do
         local u="${FREEZE[i]}"
         echo "Thawing  $u"
         systemctl thaw "$u" 2>/dev/null || true
