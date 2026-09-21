@@ -159,13 +159,14 @@ class LogicalEntityRegistry:
 
         df_paths = []
         while True:
+            # MetriLens patch: bounded, the sentinel never arrives if the bpf process died.
             try:
-                item = self._queue.get_nowait()
-                if item == self._config.sentinel:
-                    break
-                df_paths.append(item)
+                item = self._queue.get(timeout=5.0)
             except q.Empty:
-                continue
+                break
+            if item == self._config.sentinel:
+                break
+            df_paths.append(item)
 
         self._cgroup_id_map = build_cgroup_id_map()
         for item in df_paths:

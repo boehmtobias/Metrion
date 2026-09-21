@@ -107,16 +107,17 @@ class EntityTypeMonitor:
         data_record = DataRecord(entities=[], measurements=[])
         queue = self._data_source_runners[runner]
         while True:
+            # MetriLens patch: bounded, since a dead runner never sends SENT_END and the
+            # original spun on Empty forever.
             try:
-                data_record_tmp = queue.get_nowait()
-                if data_record_tmp == DataSourceRunner.SENT_END:
-                    queue.task_done()
-                    break
-                data_record.entities.extend(data_record_tmp.entities)
-                data_record.measurements.extend(data_record_tmp.measurements)
-                queue.task_done()
+                data_record_tmp = queue.get(timeout=5.0)
             except q.Empty:
-                continue
+                break
+            queue.task_done()
+            if data_record_tmp == DataSourceRunner.SENT_END:
+                break
+            data_record.entities.extend(data_record_tmp.entities)
+            data_record.measurements.extend(data_record_tmp.measurements)
 
         return data_record
 
@@ -147,8 +148,20 @@ class EntityTypeMonitor:
         for runner, queue in self._data_source_runners.items():
             logger.debug(f"Waiting for DataSourceRunner {runner._id} to join")
             runner.join(timeout=60.0)
-            logger.debug(f"Waiting for DataSourceRunner {runner._id} queue to join")
-            queue.join()
+            # MetriLens patch: drain instead of queue.join(), which never returns once a
+            # producer has died with puts still pending.
+            while True:
+                try:
+                    leftover = queue.get(timeout=1.0)
+                except q.Empty:
+                    break
+                queue.task_done()
+                if leftover == DataSourceRunner.SENT_END:
+                    continue
+                final_data_records.entities.extend(leftover.entities)
+                final_data_records.measurements.extend(leftover.measurements)
+            if runner.is_alive():
+                logger.warning(f"DataSourceRunner {runner._id} outlived its join timeout")
             logger.debug(f"DataSourceRunner {runner._id} joined")
 
         return final_data_records
