@@ -42,6 +42,9 @@ FREEZE_TIMEOUT=60
 # process that never built the list can still replay it.
 STATE_FILE="${LOG_FOLDER}/rapl-idle.frozen"
 
+# MetriLens patch: the subset of FREEZE that actually froze; read by wait_for_frozen only.
+FROZEN=()
+
 # MetriLens patch: `systemctl thaw <slice>` does not reliably clear the descendants that
 # `systemctl freeze` set, so sweep the cgroup tree and reconcile systemd's FreezerState as
 # two separate repairs. Idempotent, and a no-op on a clean thaw.
@@ -303,11 +306,16 @@ read_all_rapl() {
 ###############################################################################
 freeze_units(){
     # MetriLens patch: record the list before applying it, so a kill landing mid-freeze still
-    # leaves a complete record for the thaw path.
+    # leaves a complete record. The full list, not just FROZEN: an extra thaw is a no-op.
     printf '%s\n' "${FREEZE[@]}" > "$STATE_FILE" 2>/dev/null || true
     for u in "${FREEZE[@]}"; do
         echo "Freezing $u"
-        systemctl freeze "$u" 2>/dev/null || echo "  (skip: $u not freezable or not found)"
+        # MetriLens patch: remember what actually froze, for wait_for_frozen.
+        if systemctl freeze "$u" 2>/dev/null; then
+            FROZEN+=("$u")
+        else
+            echo "  (skip: $u not freezable or not found)"
+        fi
     done
 }
 
@@ -335,11 +343,19 @@ wait_for_frozen(){
     
     echo "Waiting for FreezerState=frozen (timeout: ${timeout}s)..."
     
+    # MetriLens patch: wait on FROZEN, not FREEZE. `systemctl show -p FreezerState` answers
+    # "running" for an unknown or inactive unit rather than the empty string the skip test
+    # below assumes, so units that never froze counted as still-freezing forever.
+    if (( ${#FROZEN[@]} == 0 )); then
+        echo "No units were frozen; nothing to wait for."
+        return 0
+    fi
+
     while true; do
         local all_frozen=true
         local still_freezing=()
         
-        for u in "${FREEZE[@]}"; do
+        for u in "${FROZEN[@]}"; do
             # Get FreezerState property (returns empty if not applicable)
             local state
             state=$(systemctl show -p FreezerState --value "$u" 2>/dev/null || echo "")
