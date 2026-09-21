@@ -13,6 +13,7 @@
 #
 set -euo pipefail
 
+# MetriLens patch: carried fix, locale-safe RAPL idle-power parsing (D. Bechthold).
 # Force a locale-independent decimal point for this script's own printf/bc
 # calculations. bc always emits dot-decimal output; under a comma-decimal
 # LC_NUMERIC (e.g. de_DE), bash's printf "%f" silently truncates that output

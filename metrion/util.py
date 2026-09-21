@@ -252,6 +252,7 @@ def read_temp_ipc(path: str) -> pl.DataFrame:
     return df
 
 
+# MetriLens patch: carried fix, Snowflake ID generation under saturation (D. Bechthold).
 def _generate_id(n: int) -> pl.Series:
     ids: list[int] = []
     gen = Measurement.get_snowflake_generator()

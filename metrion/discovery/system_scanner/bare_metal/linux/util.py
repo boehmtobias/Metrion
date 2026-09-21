@@ -171,6 +171,7 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
         raise
 
 
+# MetriLens patch: carried fix, locale-safe RAPL idle-power parsing (D. Bechthold).
 # Accepts "digits", "digits.digits", or "digits,digits" -- a single optional
 # decimal separator, either '.' or ','. Deliberately rejects mixed/repeated
 # separators, signs, and non-numeric tokens so a locale-mangled or otherwise
