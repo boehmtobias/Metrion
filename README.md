@@ -2,6 +2,25 @@
 
 METRION is a research-grade framework for attributing energy consumption. This repository provides the core framework, the energy attribution model described in the METRION paper, and the accompanying data sources and system scanning components.
 
+## About this fork
+
+This is a fork of [ds-lab/Metrion](https://github.com/ds-lab/Metrion) carrying a small number of bug
+fixes found while using METRION as a measurement instrument. The energy attribution model and its
+implementation are unchanged; the fixes are confined to RAPL idle calibration, ID generation, and the
+cgroup freeze/thaw handling around calibration.
+
+- Locale-safe RAPL idle-power parsing
+- Snowflake ID generation under saturation
+- Calibration freeze survives SIGKILL and thaws completely
+- Thaw frozen slices parents-first
+- Wait only on slices that actually froze
+- `ExecStopPost=` no longer overwrites the measurement log
+
+Full diff against upstream:
+[compare view](https://github.com/ds-lab/Metrion/compare/main...boehmtobias:Metrion:main).
+
+**If you use METRION, cite the paper under [Citation](#citation) rather than this fork.**
+
 ## Platform Support
 METRION currently targets **Linux** only. Hardware support is limited to the platforms implemented and evaluated in this repository:
 
