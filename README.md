@@ -6,15 +6,22 @@ METRION is a research-grade framework for attributing energy consumption. This r
 
 This is a fork of [ds-lab/Metrion](https://github.com/ds-lab/Metrion) carrying a small number of bug
 fixes found while using METRION as a measurement instrument. The energy attribution model and its
-implementation are unchanged; the fixes are confined to RAPL idle calibration, ID generation, and the
-cgroup freeze/thaw handling around calibration.
+implementation are unchanged; the fixes are confined to BPF compilation on newer kernels, monitor
+shutdown, RAPL idle calibration, ID generation, and the cgroup freeze/thaw handling around
+calibration.
 
+- BPF programs compile on kernel 7.x, using `uapi/linux/perf_event.h` instead of the internal header
+- Bounded shutdown drains, so a `DataSourceRunner` that has died cannot hang `metrion monitor` forever
 - Locale-safe RAPL idle-power parsing
 - Snowflake ID generation under saturation
 - Calibration freeze survives SIGKILL and thaws completely
 - Thaw frozen slices parents-first
 - Wait only on slices that actually froze
 - `ExecStopPost=` no longer overwrites the measurement log
+
+Known limitation, deliberately not fixed here: `monitoring/data_source/network/tcp_monitor.c`
+includes `<net/sock.h>` directly rather than the shared header, so it still fails to compile on
+kernel 7.x and the NETWORK data source does not run.
 
 Full diff against upstream:
 [compare view](https://github.com/ds-lab/Metrion/compare/main...boehmtobias:Metrion:main).
