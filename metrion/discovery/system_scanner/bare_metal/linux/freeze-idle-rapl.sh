@@ -21,6 +21,14 @@ set -euo pipefail
 # the host's system-wide locale configuration.
 export LC_NUMERIC=C
 
+# MetriLens patch: --thaw-only re-enters this script purely to undo a freeze it does not
+# hold, for the ExecStopPost= hook, the one cleanup path that still runs after SIGKILL.
+THAW_ONLY=0
+if [[ "${1:-}" == "--thaw-only" ]]; then
+    THAW_ONLY=1
+    shift
+fi
+
 IDLE_SEC="${1:-30}"
 shift || true
 LOG_FOLDER="${1:-/var/log}"
@@ -29,6 +37,106 @@ EXTRA_UNITS=("$@")
 
 # Timeout for waiting on FreezerState=frozen (seconds)
 FREEZE_TIMEOUT=60
+
+# MetriLens patch: freeze list persisted on apply, removed only by a completed thaw, so a
+# process that never built the list can still replay it.
+STATE_FILE="${LOG_FOLDER}/rapl-idle.frozen"
+
+# MetriLens patch: `systemctl thaw <slice>` does not reliably clear the descendants that
+# `systemctl freeze` set, so sweep the cgroup tree and reconcile systemd's FreezerState as
+# two separate repairs. Idempotent, and a no-op on a clean thaw.
+# MetriLens patch: one systemctl --user call against uid $1's manager; setpriv only when we
+# are not already that uid, since it needs CAP_SETUID even for a no-op change.
+_user_systemctl(){
+    local uid="$1"; shift
+    if [[ "$(id -u)" == "$uid" ]]; then
+        timeout 5 env XDG_RUNTIME_DIR="/run/user/${uid}" systemctl --user "$@" 2>/dev/null
+    else
+        timeout 5 env XDG_RUNTIME_DIR="/run/user/${uid}" setpriv --reuid="$uid" \
+            --regid="$uid" --clear-groups systemctl --user "$@" 2>/dev/null
+    fi
+}
+
+clear_residual_freeze(){
+    local unit="$1" cg base d subunit k state uid
+    cg=$(systemctl show -p ControlGroup --value "$unit" 2>/dev/null || true)
+    [[ -n "$cg" ]] || return 0
+    base="/sys/fs/cgroup${cg}"
+    [[ -d "$base" ]] || return 0
+    # Shallowest first, so a parent is thawed before its children: systemd will not
+    # let a child leave the frozen state while its parent is still in it.
+    while IFS= read -r d; do
+        subunit=$(basename "$d")
+        case "$subunit" in
+            *.service|*.scope|*.slice|*.mount|*.socket|*.swap) ;;
+            *) continue ;;
+        esac
+
+        # Kernel bit first: it resumes the processes and needs no manager to answer, which
+        # matters because the manager owning these units may itself be inside the freeze.
+        k=$(cat "$d/cgroup.freeze" 2>/dev/null || echo 0)
+        if [[ "$k" == "1" ]]; then
+            if echo 0 > "$d/cgroup.freeze" 2>/dev/null; then
+                echo "  (residual freeze cleared: $d/cgroup.freeze)"
+            else
+                echo "  (WARNING: could not clear residual freeze: $d/cgroup.freeze)"
+            fi
+        fi
+
+        # systemd's own FreezerState, checked independently of the bit above: anything that
+        # clears cgroup.freeze first leaves the unit running but still frozen to systemd,
+        # and a unit in that state cannot be operated on again.
+        if [[ "$d" == *"/user@"*".service/"* ]]; then
+            uid="${d#*/user@}"; uid="${uid%%.service/*}"
+            [[ "$uid" =~ ^[0-9]+$ ]] || continue
+            state=$(_user_systemctl "$uid" show -p FreezerState --value "$subunit" || true)
+            # Reported, not skipped; the kernel bit is already clear, so this never hangs.
+            if [[ -z "$state" ]]; then
+                [[ "$k" == "1" ]] && echo "  (WARNING: cannot reach user manager $uid to reconcile $subunit)"
+                continue
+            fi
+            [[ "$state" == "frozen" ]] || continue
+            if _user_systemctl "$uid" thaw "$subunit"; then
+                echo "  (systemd FreezerState reconciled via user manager $uid: $subunit)"
+            else
+                echo "  (WARNING: $subunit still frozen to its user manager $uid;"
+                echo "            remediate as that user with: systemctl --user thaw $subunit)"
+            fi
+            continue
+        fi
+        state=$(timeout 5 systemctl show -p FreezerState --value "$subunit" 2>/dev/null || true)
+        if [[ "$state" == "frozen" ]]; then
+            if timeout 5 systemctl thaw "$subunit" 2>/dev/null; then
+                echo "  (systemd FreezerState reconciled: $subunit)"
+            else
+                echo "  (WARNING: kernel clear but systemd still holds $subunit frozen)"
+            fi
+        fi
+    done < <(find "$base" -type d -printf '%d\t%p\n' 2>/dev/null | sort -n | cut -f2-)
+    return 0
+}
+
+
+# MetriLens patch: thaw-only entry point; replays the persisted list and exits before
+# section 1, so no freeze-list construction, RAPL discovery or measurement runs.
+if (( THAW_ONLY )); then
+    if [[ -r "$STATE_FILE" ]]; then
+        echo "Thaw   : $(date --iso=seconds) (--thaw-only, replaying $STATE_FILE)"
+        mapfile -t _stale < "$STATE_FILE"
+        for (( i=${#_stale[@]}-1; i>=0; i-- )); do
+            u="${_stale[i]}"
+            [[ -n "$u" ]] || continue
+            echo "Thawing  $u"
+            systemctl thaw "$u" 2>/dev/null || true
+            clear_residual_freeze "$u"
+        done
+        rm -f "$STATE_FILE" 2>/dev/null || true
+        echo "Thaw   : complete"
+    else
+        echo "Thaw   : nothing outstanding ($STATE_FILE absent)"
+    fi
+    exit 0
+fi
 
 ###############################################################################
 # 1. Build the list of units/slices to freeze
@@ -193,6 +301,9 @@ read_all_rapl() {
 # 4. Helpers
 ###############################################################################
 freeze_units(){
+    # MetriLens patch: record the list before applying it, so a kill landing mid-freeze still
+    # leaves a complete record for the thaw path.
+    printf '%s\n' "${FREEZE[@]}" > "$STATE_FILE" 2>/dev/null || true
     for u in "${FREEZE[@]}"; do
         echo "Freezing $u"
         systemctl freeze "$u" 2>/dev/null || echo "  (skip: $u not freezable or not found)"
@@ -205,7 +316,11 @@ thaw_units(){
         local u="${FREEZE[i]}"
         echo "Thawing  $u"
         systemctl thaw "$u" 2>/dev/null || true
+        # MetriLens patch: systemctl thaw alone does not guarantee descendants are running.
+        clear_residual_freeze "$u"
     done
+    # MetriLens patch: only a completed thaw retires the outstanding-freeze marker.
+    rm -f "$STATE_FILE" 2>/dev/null || true
 }
 
 # Wait for all units to reach FreezerState=frozen

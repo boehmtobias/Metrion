@@ -105,6 +105,14 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
     except FileNotFoundError:
         pass
 
+    # MetriLens patch: ExecStopPost= re-enters the script in --thaw-only mode so a
+    # SIGKILLed run still thaws, and RuntimeMaxSec= bounds a wedged one. dwell+240
+    # covers the freeze wait, the dwell and margin; the Python timeout below derives
+    # from it so the two cannot invert.
+    thaw_only_cmd = f"{script_path} --thaw-only {dwell_time} {log_folder}"
+
+    run_max_sec = dwell_time + 240
+
     cmd = [
         "sudo",
         "systemd-run",
@@ -112,6 +120,8 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
         "--collect",
         "--wait",
         "--property=StandardOutput=file:" + str(log_file),
+        "--property=ExecStopPost=" + thaw_only_cmd,
+        "--property=RuntimeMaxSec=" + str(run_max_sec),
         str(script_path),
         str(dwell_time),
         str(log_folder),
@@ -122,7 +132,9 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
     else:
         cmd.extend(["kubepods.slice", "k3s.service", "containerd.service"])
 
-    timeout = dwell_time + 120
+    # Stay ahead of RuntimeMaxSec so the systemd-managed stop/thaw sequence is what
+    # ends a wedged run, not this Python-level watchdog firing first.
+    timeout = run_max_sec + 60
     logger.debug(f"Starting RAPL idle measurement for {dwell_time}s (timeout {timeout}s), cmd: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, check=True, timeout=timeout, capture_output=True, text=True)
