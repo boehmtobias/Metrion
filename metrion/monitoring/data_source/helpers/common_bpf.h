@@ -1,9 +1,17 @@
 #ifndef COMMON_BPF_H
 #define COMMON_BPF_H
 
-#include <linux/perf_event.h>
+/* MetriLens patch: internal perf_event.h pulls in linux/bpf.h, which bcc cannot
+   compile on kernel 7.0. Only task_struct and mm_struct are needed from internal headers. */
+#include <linux/sched.h>
+#include <linux/mm_types.h>
+#include <uapi/linux/perf_event.h>
 
+/* MetriLens patch: newer kernels declare this as an enum in linux/sched.h. */
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
 #define TASK_COMM_LEN 16
+#endif
 #define CMDLINE_MAX_LEN 128
 
 /*
