@@ -106,12 +106,13 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
         pass
 
     # MetriLens patch: ExecStopPost= re-enters the script in --thaw-only mode so a
-    # SIGKILLed run still thaws, and RuntimeMaxSec= bounds a wedged one. dwell+240
-    # covers the freeze wait, the dwell and margin; the Python timeout below derives
+    # SIGKILLed run still thaws, and RuntimeMaxSec= bounds a wedged one. The unit's
+    # overhead is the freeze wait plus the thaw, neither of which scales with the
+    # dwell, so a fixed margin is the right shape; the Python timeout below derives
     # from it so the two cannot invert.
     thaw_only_cmd = f"{script_path} --thaw-only {dwell_time} {log_folder}"
 
-    run_max_sec = dwell_time + 240
+    run_max_sec = dwell_time + 90
 
     cmd = [
         "sudo",
@@ -125,6 +126,10 @@ def run_rapl_idle_measurement(dwell_time=60, extra_units=None):
         "--property=StandardOutput=append:" + str(log_file),
         "--property=ExecStopPost=" + thaw_only_cmd,
         "--property=RuntimeMaxSec=" + str(run_max_sec),
+        # MetriLens patch: bound the ExecStopPost thaw explicitly rather than
+        # inheriting the host's DefaultTimeoutStopUSec, which can be shorter than
+        # the replay needs and then SIGKILLs it mid-thaw.
+        "--property=TimeoutStopSec=60",
         str(script_path),
         str(dwell_time),
         str(log_folder),
