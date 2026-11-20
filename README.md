@@ -4,7 +4,8 @@ METRION is a research-grade framework for attributing energy consumption. This r
 
 ## About this fork
 
-This is a fork of [ds-lab/Metrion](https://github.com/ds-lab/Metrion) carrying a small number of bug
+This is a fork of [ds-lab/Metrion](https://github.com/ds-lab/Metrion), branched at upstream commit
+`38a7bd5` (tag `upstream-base`), carrying a small number of bug
 fixes found while using METRION as a measurement instrument. The energy attribution model and its
 implementation are unchanged; the fixes are confined to BPF compilation on newer kernels, monitor
 shutdown, RAPL idle calibration, ID generation, and the cgroup freeze/thaw handling around
@@ -24,7 +25,7 @@ includes `<net/sock.h>` directly rather than the shared header, so it still fail
 kernel 7.x and the NETWORK data source does not run.
 
 Full diff against upstream:
-[compare view](https://github.com/ds-lab/Metrion/compare/main...boehmtobias:Metrion:main).
+[compare view](https://gitlab.rlp.net/w3-fusion-lab/software/metrion-fork/-/compare/upstream-base...main).
 
 **If you use METRION, cite the paper under [Citation](#citation) rather than this fork.**
 
