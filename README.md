@@ -1,5 +1,7 @@
 # METRION
 
+> **This fork has moved to [gitlab.rlp.net/w3-fusion-lab/software/metrion-fork](https://gitlab.rlp.net/w3-fusion-lab/software/metrion-fork).** This GitHub copy is archived and no longer maintained. For METRION itself, see [ds-lab/Metrion](https://github.com/ds-lab/Metrion).
+
 METRION is a research-grade framework for attributing energy consumption. This repository provides the core framework, the energy attribution model described in the METRION paper, and the accompanying data sources and system scanning components.
 
 ## About this fork
